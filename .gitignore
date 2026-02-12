@@ -1,0 +1,17 @@
+# environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# results & generated data (big)
+data/results/
+data/generated/
+data/injected/
+
+# notebooks checkpoints
+.ipynb_checkpoints/
+
+# logs
+*.log
