@@ -1,0 +1,50 @@
+experiment:
+  sampling_minutes: 5
+  seeds: 10
+  windows: [6, 12, 24, 48]
+
+paths:
+  generated_dir: data/generated
+  injected_dir: data/injected
+  results_dir: data/results
+
+data:
+  start: "2024-01-01T00:00:00"
+  end: "2024-01-07T23:50:00"
+  freq_minutes: 10
+
+solar_model:
+  capacity_kw: 1000
+  base_efficiency: 0.20
+  temp_coefficient: -0.004
+
+fault_injection:
+  S1_missing_burst:
+    bursts: 3
+    duration_minutes: 120
+
+  S3_late_arrivals:
+    probability: 0.05
+    max_delay_minutes: 90
+
+  S8_efficiency_drop:
+    drop_percent: 0.25
+    duration_minutes: 240
+
+edge:
+  kpis:
+    freshness:
+      delta_max_minutes: 180
+  thresholds:
+    tau_v: 0.7
+    tau_r: 0.9
+    late_minutes: 30
+    late_ratio: 0.05
+    min_completeness: 0.9995
+baseline_stats:
+  output_file: data/generated/baseline_stats.json
+evaluation:
+  expected_label:
+    S1_missing_burst: fault
+    S3_late_arrivals: fault
+    S8_efficiency_drop: anomaly

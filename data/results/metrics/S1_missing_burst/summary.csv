@@ -1,0 +1,5 @@
+scenario,w,target,precision,recall,f1,false_positives_per_day,mean_delay_minutes,median_delay_minutes,p90_delay_minutes,p95_delay_minutes,tp_windows,fp_windows,fn_events
+S1_missing_burst,6,fault,0.5798319327731093,1.0,0.7340425531914894,0.3333526245731813,0.0,0.0,0.0,0.0,276,200,0
+S1_missing_burst,12,fault,0.3854748603351955,1.0,0.5564516129032259,0.7333757740609989,0.0,0.0,0.0,0.0,276,440,0
+S1_missing_burst,24,fault,0.23076923076923078,1.0,0.375,1.5334220730366341,0.0,0.0,0.0,0.0,276,920,0
+S1_missing_burst,48,fault,0.12819321876451464,1.0,0.22725401399752984,3.1285143816193064,0.0,0.0,0.0,0.0,276,1877,0
