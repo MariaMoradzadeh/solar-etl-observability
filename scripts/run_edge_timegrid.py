@@ -1,12 +1,13 @@
+from __future__ import annotations
 
 import argparse
-from pathlib import Path
-from datetime import datetime
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yaml
+
 
 def load_cfg(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -18,12 +19,34 @@ def ensure_dir(p: Path) -> None:
 
 
 def load_baseline(cfg: dict) -> dict:
-    p = Path(cfg["baseline_stats"]["output_file"])
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """
+    Loads baseline stats JSON used for mu0/sigma0.
+    Prefers cfg["baseline_stats"]["output_file"] if available.
+    Falls back to data/generated/baseline_stats.json if missing.
+    """
+    # Try config path
+    p = None
+    try:
+        p = Path(cfg["baseline_stats"]["output_file"])
+    except Exception:
+        p = None
+
+    if p is not None and p.exists():
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    # Fallback
+    fallback = Path("data/generated/baseline_stats.json")
+    if fallback.exists():
+        with open(fallback, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    raise FileNotFoundError(
+        "Baseline stats JSON not found. Expected cfg['baseline_stats']['output_file'] or data/generated/baseline_stats.json"
+    )
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--scenarios", nargs="+", required=True)
@@ -32,40 +55,44 @@ def main():
     args = ap.parse_args()
 
     cfg = load_cfg(args.config)
+
+    # Experiment settings
+    dt = int(cfg["experiment"]["sampling_minutes"])  # e.g., 5
+    inj_root = Path(cfg["paths"]["injected_dir"])
+    out_root = Path(cfg["paths"]["results_dir"]) / "edge_timegrid"
+    ensure_dir(out_root)
+
+    # Thresholds
+    th = cfg.get("edge", {}).get("thresholds", {})
+    min_c = float(th.get("min_completeness", 0.9995))
+    late_m = float(th.get("late_minutes", 30))
+    late_p = float(th.get("late_ratio", 0.05))
+
+    # Baseline P stats for CUSUM drift
     baseline = load_baseline(cfg)
     mu0 = float(baseline["P"]["mean"])
     sigma0 = float(baseline["P"]["std"])
+    sigma0 = sigma0 if sigma0 > 0 else 1e-9
 
-    dt = int(cfg["experiment"]["sampling_minutes"])
-    inj_root = Path(cfg["paths"]["injected_dir"])
-    out_root = Path(cfg["paths"]["results_dir"]) / "edge_timegrid"
-    ensure_dir(out_root)
-
-    th = cfg["edge"]["thresholds"]
-    min_c = float(th.get("min_completeness", 0.9995))
-    late_m = float(th.get("late_minutes", 30))
-    late_p = float(th.get("late_ratio", 0.05))
-
-    baseline = load_baseline(cfg)
-
-    dt = int(cfg["experiment"]["sampling_minutes"])
-    inj_root = Path(cfg["paths"]["injected_dir"])
-    out_root = Path(cfg["paths"]["results_dir"]) / "edge_timegrid"
-    ensure_dir(out_root)
-
-    th = cfg["edge"]["thresholds"]
-    min_c = float(th.get("min_completeness", 0.9995))
-    late_m = float(th.get("late_minutes", 30))
-    late_p = float(th.get("late_ratio", 0.05))
-
-    # اگر این‌ها رو داری در config، به همان‌ها وصل می‌شیم
-    kpi_cfg = cfg.get("edge", {}).get("kpis", {})
+    # Seed list: if args.seeds=10 => seeds 1..10
+    seed_list = list(range(1, args.seeds + 1))
 
     for scenario in args.scenarios:
-        for seed in range(1, args.seeds + 1):
-            df = pd.read_parquet(inj_root / scenario / f"seed_{seed}.parquet")
+        scenario_dir = inj_root / scenario
+        if not scenario_dir.exists():
+            raise FileNotFoundError(f"Injected scenario dir not found: {scenario_dir}")
+
+        for seed in seed_list:
+            inj_path = scenario_dir / f"seed_{seed}.parquet"
+            if not inj_path.exists():
+                raise FileNotFoundError(f"Injected parquet not found: {inj_path}")
+
+            df = pd.read_parquet(inj_path)
+
+            # Ensure timestamps
             df["event_time"] = pd.to_datetime(df["event_time"])
             df["arrival_time"] = pd.to_datetime(df["arrival_time"])
+
             df = df.sort_values("event_time").reset_index(drop=True)
 
             # Time grid
@@ -80,42 +107,52 @@ def main():
                 rows = []
                 win_minutes = (w - 1) * dt
 
-                # CUSUM state (reset per scenario/seed/window)
+                # ✅ CUSUM state: reset once per (scenario, seed, w)
                 s_pos = 0.0
                 s_neg = 0.0
-               
+
+                # CUSUM params (can tune later)
+                k = 0.5 * sigma0
+                h = 5.0 * sigma0
+
                 for end_time in grid:
                     start_time = end_time - pd.Timedelta(minutes=win_minutes)
                     df_w = df.loc[start_time:end_time]
 
-                    expected = w  # دقیقاً w نقطه زمانی باید باشد
+                    # Completeness: expected exactly w samples on the grid
+                    expected = w
                     observed = int(df_w.index.nunique())
                     completeness = float(observed / expected) if expected > 0 else 0.0
 
                     # Late arrivals
-                    late = ((df_w["arrival_time"] - df_w["event_time"]).dt.total_seconds() / 60.0) > late_m
-                    late_ratio = float(np.mean(late)) if len(df_w) else 0.0
+                    if len(df_w):
+                        late = (
+                            (df_w["arrival_time"] - df_w["event_time"])
+                            .dt.total_seconds()
+                            .to_numpy(dtype=float)
+                            / 60.0
+                        ) > late_m
+                        late_ratio = float(np.mean(late)) if len(late) else 0.0
+                    else:
+                        late_ratio = 0.0
+
+                    # Window mean power (P)
                     window_mean_P = float(df_w["P"].mean()) if len(df_w) else float("nan")
-                    # CUSUM drift (gradual change) on window_mean_P
+
+                    # ✅ CUSUM drift (stateful across time)
                     drift = False
                     if np.isfinite(window_mean_P):
-                        x0 = mu0  # baseline mean for P
-                        k = 0.5 * sigma0
-                        h = 5.0 * sigma0
-
-                        s_pos = max(0.0, s_pos + ((window_mean_P - x0) - k))
-                        s_neg = min(0.0, s_neg + ((window_mean_P - x0) + k))
-
-                        if s_pos > h or abs(s_neg) > h:
+                        s_pos = max(0.0, s_pos + ((window_mean_P - mu0) - k))
+                        s_neg = min(0.0, s_neg + ((window_mean_P - mu0) + k))
+                        if (s_pos > h) or (abs(s_neg) > h):
                             drift = True
-                    # Simple anomaly baseline (keep compatible)
-                    # (اگر ستون power_kw داری، روی آن نگاه می‌کنیم)
+
+                    # Simple anomaly baseline on raw P (z-score > 3)
                     anomaly = False
                     if "P" in df_w.columns and len(df_w):
                         x = df_w["P"].to_numpy(dtype=float)
-                        
-                        mu = np.nanmean(x)
-                        sd = np.nanstd(x) + 1e-9
+                        mu = float(np.nanmean(x))
+                        sd = float(np.nanstd(x)) + 1e-9
                         z = np.abs((x - mu) / sd)
                         anomaly = bool(np.any(z > 3.0))
 
@@ -128,6 +165,9 @@ def main():
                     elif late_ratio > late_p:
                         alert_type = "fault"
                         reason = f"late_ratio>{late_p}"
+                    elif drift:
+                        alert_type = "anomaly"
+                        reason = "cusum_drift"
                     elif anomaly:
                         alert_type = "anomaly"
                         reason = "zscore>3"

@@ -1,0 +1,4 @@
+scenario,w,target,precision,recall,f1,false_positives_per_day,median_delay_minutes,p90_delay_minutes,p95_delay_minutes,tp_windows,fp_windows,fn_events
+S1_missing_burst,6,fault,0.5798319327731093,1.0,0.7340425531914894,0.3333526245731813,0.0,0.0,0.0,276,200,0
+S3_late_arrivals,6,fault,0.9971785403095308,1.0,0.9985872771845264,0.1133398923548816,17.5,278.0,313.9999999999999,24033,68,0
+S8_efficiency_drop,24,anomaly,0.0,0.0,0.0,3.9002257075062214,830.0,862.0,866.0,0,234,0
