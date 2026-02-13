@@ -1,5 +1,2 @@
 scenario,w,target,precision,recall,f1,false_positives_per_day,mean_delay_minutes,median_delay_minutes,p90_delay_minutes,p95_delay_minutes,tp_windows,fp_windows,fn_events
-S8_efficiency_drop,6,anomaly,0.0,0.0,0.0,0.0,,,,,0,0,20
-S8_efficiency_drop,12,anomaly,0.0,0.0,0.0,0.0,,,,,0,0,20
-S8_efficiency_drop,24,anomaly,0.0,0.0,0.0,0.0,,,,,0,0,20
-S8_efficiency_drop,48,anomaly,0.0,0.0,0.0,0.0,,,,,0,0,20
+S8_efficiency_drop,24,anomaly,0.0,0.0,0.0,3.9002257075062214,830.0,830.0,862.0,866.0,0,234,0

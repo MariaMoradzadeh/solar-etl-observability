@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -8,7 +7,6 @@ import json
 import numpy as np
 import pandas as pd
 import yaml
-
 
 def load_cfg(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -34,6 +32,20 @@ def main():
     args = ap.parse_args()
 
     cfg = load_cfg(args.config)
+    baseline = load_baseline(cfg)
+    mu0 = float(baseline["P"]["mean"])
+    sigma0 = float(baseline["P"]["std"])
+
+    dt = int(cfg["experiment"]["sampling_minutes"])
+    inj_root = Path(cfg["paths"]["injected_dir"])
+    out_root = Path(cfg["paths"]["results_dir"]) / "edge_timegrid"
+    ensure_dir(out_root)
+
+    th = cfg["edge"]["thresholds"]
+    min_c = float(th.get("min_completeness", 0.9995))
+    late_m = float(th.get("late_minutes", 30))
+    late_p = float(th.get("late_ratio", 0.05))
+
     baseline = load_baseline(cfg)
 
     dt = int(cfg["experiment"]["sampling_minutes"])
@@ -68,6 +80,10 @@ def main():
                 rows = []
                 win_minutes = (w - 1) * dt
 
+                # CUSUM state (reset per scenario/seed/window)
+                s_pos = 0.0
+                s_neg = 0.0
+               
                 for end_time in grid:
                     start_time = end_time - pd.Timedelta(minutes=win_minutes)
                     df_w = df.loc[start_time:end_time]
@@ -79,12 +95,25 @@ def main():
                     # Late arrivals
                     late = ((df_w["arrival_time"] - df_w["event_time"]).dt.total_seconds() / 60.0) > late_m
                     late_ratio = float(np.mean(late)) if len(df_w) else 0.0
+                    window_mean_P = float(df_w["P"].mean()) if len(df_w) else float("nan")
+                    # CUSUM drift (gradual change) on window_mean_P
+                    drift = False
+                    if np.isfinite(window_mean_P):
+                        x0 = mu0  # baseline mean for P
+                        k = 0.5 * sigma0
+                        h = 5.0 * sigma0
 
+                        s_pos = max(0.0, s_pos + ((window_mean_P - x0) - k))
+                        s_neg = min(0.0, s_neg + ((window_mean_P - x0) + k))
+
+                        if s_pos > h or abs(s_neg) > h:
+                            drift = True
                     # Simple anomaly baseline (keep compatible)
                     # (اگر ستون power_kw داری، روی آن نگاه می‌کنیم)
                     anomaly = False
-                    if "power_kw" in df_w.columns and len(df_w):
-                        x = df_w["power_kw"].to_numpy(dtype=float)
+                    if "P" in df_w.columns and len(df_w):
+                        x = df_w["P"].to_numpy(dtype=float)
+                        
                         mu = np.nanmean(x)
                         sd = np.nanstd(x) + 1e-9
                         z = np.abs((x - mu) / sd)
@@ -106,6 +135,7 @@ def main():
                     rows.append(
                         {
                             "window_end_time": end_time,
+                            "window_mean_P": window_mean_P,
                             "alert_type": alert_type,
                             "reason": reason,
                             "completeness": completeness,
