@@ -48,3 +48,6 @@ evaluation:
     S1_missing_burst: fault
     S3_late_arrivals: fault
     S8_efficiency_drop: anomaly
+
+evaluation:
+  expected_label: anomaly

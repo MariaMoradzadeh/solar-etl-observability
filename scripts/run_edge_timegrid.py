@@ -113,7 +113,7 @@ def main() -> None:
 
                 # CUSUM params (can tune later)
                 k = 0.5 * sigma0
-                h = 5.0 * sigma0
+                h = 10.0 * sigma0
 
                 for end_time in grid:
                     start_time = end_time - pd.Timedelta(minutes=win_minutes)
